@@ -1,3 +1,4 @@
+import {createGamepadInput} from './gamepad.mjs';
 import {installTouch} from './touch.mjs?v=rapid-fire';
 import {VatCharacters} from './vendor/vat-characters.mjs';
 import {buildRoads,planFormation,routeTo,waves,knightBody} from './defense.mjs';
@@ -5,7 +6,7 @@ import * as pc from './vendor/playcanvas.mjs';
 import {loadTerrain} from './terrain.mjs';
 const $=id=>document.getElementById(id);
 const canvas=$('view'), start=$('start'), details=$('detail'), hud=$('hud');
-const touchDevice=navigator.maxTouchPoints>0;
+const touchDevice=matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints>0 && !matchMedia('(any-pointer: fine)').matches);
 document.documentElement.classList.toggle('touch',touchDevice);
 const params=new URLSearchParams(location.search);
 details.value=params.has('full')||params.has('preview')?'preview':params.has('mobile')||touchDevice?'mobile':'preview';
@@ -139,18 +140,26 @@ async function boot(){
         $('status').textContent='';
     }
 
-    let touchPlaying=false;
-    const active=()=>touchPlaying||document.pointerLockElement===canvas;
+    let touchPlaying=false,padPlaying=false,started=false,pad=null,aiming=false;
+    const readPad=createGamepadInput();
+    let lastStartTouch=touchDevice;
+    start.addEventListener('pointerdown',e=>{lastStartTouch=e.pointerType==='touch';});
+    const locked=()=>document.pointerLockElement===canvas;
+    const active=()=>touchPlaying||padPlaying||locked();
     function sync(){
         const on=active();
+        $('menu-title').textContent=finished?'Defense complete':started&&!on?'Paused':'Towers Watch';
+        $('reset-game').hidden=!started||on||finished;
+        $('pad-pause').hidden=!padPlaying||locked();
+        aiming=false;
         document.documentElement.classList.toggle('touch-playing',touchPlaying);
         $('overlay').hidden=on;hud.hidden=!on;$('feedback').hidden=!on;$('ret').hidden=!on;
         $('controls').hidden=!touchPlaying;$('return-home').hidden=on||!touchDevice||finished;
         keys.clear();touch.reset();charge=-1;start.textContent=finished?'Play again':'Resume defense';
     }
     function pause(){
-        if(document.pointerLockElement===canvas)document.exitPointerLock();
-        else {touchPlaying=false;sync();}
+        touchPlaying=false;padPlaying=false;
+        if(locked())document.exitPointerLock();else sync();
     }
     function jump(){if(grounded){vy=6.4;grounded=false;}}
     function sneak(){if(!crouch||!terrain.blocked(p.x,p.y+.015,p.z,1.82,.32))crouch=!crouch;}
@@ -159,24 +168,62 @@ async function boot(){
     function release(){if(active()&&charge>=0){shoot();charge=-1;recoil=.16;}}
     const touch=installTouch({stick:$('stick'),canvas,fire:$('fire'),look,draw,release,cancel:()=>charge=-1});
     $('jump').onclick=jump;$('sneak').onclick=sneak;$('pause').onclick=pause;
-    $('return-home').onclick=()=>{home();touchPlaying=true;sync();};
+    async function enter(input,reset=false){
+        if(finished||reset)restart();
+        started=true;touchPlaying=input==='touch';padPlaying=input==='pad';
+        if(input!=='pad')lastStartTouch=touchPlaying;
+        document.documentElement.classList.toggle('touch',touchPlaying);
+        if(touchPlaying||padPlaying)sync();
+        else try{await canvas.requestPointerLock();}catch(err){$('status').textContent=err.message;}
+    }
+    $('return-home').onclick=()=>{home();enter('touch');};
+    $('pad-pause').onclick=pause;
     start.disabled=false;start.textContent='Enter the village';
-    start.onclick=async()=>{try{if(finished)restart();if(touchDevice){touchPlaying=true;sync();}else await canvas.requestPointerLock();}catch(err){$('status').textContent=err.message;}};
-    document.addEventListener('pointerlockchange',sync);
+    start.onclick=()=>enter(lastStartTouch?'touch':'mouse');
+    $('reset-game').onclick=e=>enter(e.pointerType==='touch'||(!e.pointerType&&lastStartTouch)?'touch':'mouse',true);
+    document.addEventListener('pointerlockchange',()=>{
+        if(locked()){padPlaying=false;touchPlaying=false;}
+        sync();
+    });
+    canvas.addEventListener('pointerdown',e=>{
+        if(padPlaying&&e.pointerType==='mouse'&&!locked())enter('mouse');
+    });
+    function pollController(dt){
+        const connected=!!pad;
+        pad=readPad();
+        if(connected!==!!pad)$('pad-help').hidden=!pad;
+        if(!pad){aiming=false;if(connected)charge=-1;if(padPlaying)pause();return;}
+        if(document.hidden||!document.hasFocus())return;
+        if(!active()){
+            if(pad.pressed(9)||pad.pressed(0))enter('pad');
+            else if(started&&!finished&&pad.pressed(3))enter('pad',true);
+            return;
+        }
+        if(pad.pressed(9)){pause();return;}
+        aiming=!!pad.held[6];
+        yaw-=pad.look[0]*dt*(aiming?1.3:2.7);
+        pitch=clamp(pitch-pad.look[1]*dt*(aiming?1:2),-1.05,.95);
+        if(pad.pressed(0))jump();
+        if(pad.pressed(1))sneak();
+        if(pad.pressed(3))home();
+        if(pad.pressed(7))draw();
+        if(pad.released(7))release();
+        if(pad.pressed(2)&&charge<0){draw();release();}
+    }
     addEventListener('blur',()=>{if(active())pause();});
     document.addEventListener('visibilitychange',()=>{if(document.hidden&&active())pause();});
-    addEventListener('mousemove',e=>{if(!touchPlaying)look(e.movementX*.77,e.movementY*.77);});
+    addEventListener('mousemove',e=>{if(locked())look(e.movementX*.77,e.movementY*.77);});
     addEventListener('keydown',e=>{
         if(!active())return;e.preventDefault();keys.add(e.code);if(e.repeat)return;
         if(e.code==='KeyC')sneak();
         if(e.code==='Space')jump();
         if(e.code==='KeyR')home();
-        if(e.code==='Escape'&&touchPlaying)pause();
+        if(e.code==='KeyP'||(e.code==='Escape'&&!locked()))pause();
         if(e.code==='KeyF'&&!enemies.length&&!pending.length&&wave<5){formation();timer=5;}
     });
     addEventListener('keyup',e=>keys.delete(e.code));
-    addEventListener('mousedown',e=>{if(!touchPlaying&&e.button===0)draw();});
-    addEventListener('mouseup',e=>{if(!touchPlaying&&e.button===0)release();});
+    addEventListener('mousedown',e=>{if(locked()&&e.button===0)draw();});
+    addEventListener('mouseup',e=>{if(locked()&&e.button===0)release();});
     function formation(){
         wave++;
         for(const b of banners.values())b.destroy();banners.clear();
@@ -243,9 +290,9 @@ async function boot(){
         p.x+=dx;p.z+=dz;
     }
     function move(dt){
-        const fore=touch.axis.y||Number(keys.has('KeyW'))-Number(keys.has('KeyS'));
-        const side=touch.axis.x||Number(keys.has('KeyD'))-Number(keys.has('KeyA'));
-        const moving=!!(fore||side),run=Math.hypot(touch.axis.x,touch.axis.y)>.57||keys.has('ShiftLeft')||keys.has('ShiftRight'),sprint=run&&fore>0&&(touch.axis.y>.88||keys.has('KeyE'));
+        const fore=touch.axis.y||-(pad?.move[1]||0)||Number(keys.has('KeyW'))-Number(keys.has('KeyS'));
+        const side=touch.axis.x||pad?.move[0]||Number(keys.has('KeyD'))-Number(keys.has('KeyA'));
+        const moving=!!(fore||side),run=(pad&&Math.hypot(...pad.move)>.55)||Math.hypot(touch.axis.x,touch.axis.y)>.57||keys.has('ShiftLeft')||keys.has('ShiftRight'),sprint=run&&fore>0&&(pad?.held[10]||touch.axis.y>.88||keys.has('KeyE'));
         mode=!grounded?'Jump':crouch?'Crouch':!moving?'Idle':sprint?'Sprint':run?'Run':'Walk';
         const speed=crouch?1.25:sprint?6.5:run?4:2;
         const distance=speed*dt/Math.max(1,Math.hypot(fore,side));
@@ -253,7 +300,7 @@ async function boot(){
         const dz=(Math.cos(yaw)*fore+Math.sin(yaw)*side)*distance;
         const steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/.075));
         for(let i=0;i<steps;i++){walk(dx/steps,0);walk(0,dz/steps);}
-        if(charge>=0||recoil>0||crouch)face=yaw;else if(moving)face=Math.atan2(dx,dz);
+        if(aiming||charge>=0||recoil>0||crouch)face=yaw;else if(moving)face=Math.atan2(dx,dz);
         const ground=terrain.support(p.x,p.y+.27,p.z,40);
         if(grounded&&ground<p.y-.32)grounded=false;
         if(grounded&&Number.isFinite(ground))p.y=ground;
@@ -288,7 +335,7 @@ async function boot(){
     function view(){
         aim.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
         focus.copy(p).add(vec(-Math.cos(yaw)*.46,crouch?1.1:1.47,Math.sin(yaw)*.46));
-        const boom=aim.clone().mulScalar(charge>=0?-2.45:-3.7);
+        const boom=aim.clone().mulScalar(aiming||charge>=0?-2.45:-3.7);
         const t=terrain.ray(focus.x,focus.y,focus.z,boom.x,boom.y,boom.z);
         const eye=focus.clone().add(boom.mulScalar(Math.max(.04,Math.min(1,t-.055))));
         backdrop.setPosition(eye);camera.setPosition(eye);camera.lookAt(eye.clone().add(aim));
@@ -389,8 +436,9 @@ async function boot(){
     }
     move(0);view();
     app.on('update',elapsed=>{
-        if(!active()||finished)return;
         const dt=Math.min(elapsed,.06);
+        pollController(dt);
+        if(!active()||finished)return;
         if(charge>=0)charge=Math.min(1,charge+dt/.42);
         invulnerable=Math.max(0,invulnerable-dt);move(dt);view();advance(dt);feedback(dt);drawKnights();if(charge>=0)preview();
         recoil=Math.max(0,recoil-dt);
