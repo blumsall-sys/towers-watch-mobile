@@ -8,7 +8,7 @@ const canvas=$('view'), start=$('start'), details=$('detail'), hud=$('hud');
 const touchDevice=navigator.maxTouchPoints>0;
 document.documentElement.classList.toggle('touch',touchDevice);
 const params=new URLSearchParams(location.search);
-const localFull=location.hostname==='localhost'||location.hostname==='127.0.0.1';
+const localFull=!document.documentElement.hasAttribute('data-pages')&&(location.hostname==='localhost'||location.hostname==='127.0.0.1');
 if(!localFull)details.querySelector('[value=full]').remove();
 details.value=params.has('full')&&localFull?'full':params.has('preview')?'preview':params.has('mobile')||touchDevice?'mobile':'preview';
 details.onchange=()=>location.search='?'+details.value;
