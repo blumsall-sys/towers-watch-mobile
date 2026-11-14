@@ -8,9 +8,7 @@ const canvas=$('view'), start=$('start'), details=$('detail'), hud=$('hud');
 const touchDevice=navigator.maxTouchPoints>0;
 document.documentElement.classList.toggle('touch',touchDevice);
 const params=new URLSearchParams(location.search);
-const localFull=!document.documentElement.hasAttribute('data-pages')&&(location.hostname==='localhost'||location.hostname==='127.0.0.1');
-if(!localFull)details.querySelector('[value=full]').remove();
-details.value=params.has('full')&&localFull?'full':params.has('preview')?'preview':params.has('mobile')||touchDevice?'mobile':'preview';
+details.value=params.has('full')||params.has('preview')?'preview':params.has('mobile')||touchDevice?'mobile':'preview';
 details.onchange=()=>location.search='?'+details.value;
 const vec=(x=0,y=0,z=0)=>new pc.Vec3(x,y,z);
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
@@ -38,9 +36,32 @@ async function boot(){
     const names=['Erika Archer With Bow Arrow','standing draw arrow','standing aim overdraw','standing aim recoil','standing aim walk forward','standing aim walk back','standing aim walk left','standing aim walk right','standing idle 01','Crouched Sneaking Right'];
     const pack=Promise.all(names.map((name,i)=>asset('assets/'+encodeURIComponent(i===0&&details.value==="mobile"?"archer-mobile":name)+'.glb','container')));
     const [terrain,container,splat,placement,crouchAsset,gear,arrowAsset]=await Promise.all([loadTerrain(),asset('archer-tracks.glb','container'),
-        asset(details.value==='full'?'original.ply':details.value==='mobile'?'village-mobile.ply':'village-preview.ply','gsplat'),fetch('placement.json').then(r=>r.json()),asset('crouch.glb','container'),pack,asset('assets/arrow.glb','container'),crowdReady]);
+        asset(details.value==='mobile'?'village-mobile-v2.compressed.ply':'village-full-v2.compressed.ply','gsplat'),fetch('placement.json').then(r=>r.json()),asset('crouch.glb','container'),pack,asset('assets/arrow.glb','container'),crowdReady]);
     crowd.capacity=waves.at(-1).count;crowd.count=0;
     const durations=Object.fromEntries(crowd.animations.map(a=>[a.name,a.duration]));
+    // The capture panorama covers any residual transparency at the scan edge.
+    const backdrop=entity('Village panorama');
+    const panorama=(await asset('village-panorama.jpg','texture')).resource;
+    const materialSky=new pc.StandardMaterial();
+    materialSky.useLighting=false;
+    materialSky.emissive.set(1,1,1);
+    materialSky.emissiveMap=panorama;
+    materialSky.cull=pc.CULLFACE_NONE;
+    materialSky.depthWrite=false;
+    materialSky.update();
+    const positions=[],uvs=[],indices=[];
+    for(let row=0;row<=32;row++){
+        const latitude=Math.PI*(row/32-.5);
+        for(let col=0;col<=64;col++){
+            const angle=(.30-col/64)*Math.PI*2;
+            positions.push(800*Math.cos(latitude)*Math.sin(angle),800*Math.sin(latitude),800*Math.cos(latitude)*Math.cos(angle));
+            uvs.push(col/64,row/32);
+            if(row<32&&col<64){const i=row*65+col;indices.push(i,i+1,i+65,i+1,i+66,i+65);}
+        }
+    }
+    const dome=new pc.Mesh(app.graphicsDevice);
+    dome.setPositions(positions);dome.setUvs(0,uvs);dome.setIndices(indices);dome.update();
+    backdrop.addComponent('render',{meshInstances:[new pc.MeshInstance(dome,materialSky)],castShadows:false,receiveShadows:false});
     const village=entity('Medieval Village Sunset');
     const matrix=new pc.Mat4().set(placement[0].map((_,i)=>placement.map(row=>row[i])).flat());
     village.setPosition(matrix.getTranslation());village.setRotation(new pc.Quat().setFromMat4(matrix));
@@ -269,7 +290,7 @@ async function boot(){
         const boom=aim.clone().mulScalar(charge>=0?-2.45:-3.7);
         const t=terrain.ray(focus.x,focus.y,focus.z,boom.x,boom.y,boom.z);
         const eye=focus.clone().add(boom.mulScalar(Math.max(.04,Math.min(1,t-.055))));
-        camera.setPosition(eye);camera.lookAt(eye.clone().add(aim));
+        backdrop.setPosition(eye);camera.setPosition(eye);camera.lookAt(eye.clone().add(aim));
         origin.copy(p).add(vec(Math.sin(yaw)*.64,crouch?.99:1.37,Math.cos(yaw)*.64));
         nocked.enabled=charge>=0;
         if(nocked.enabled){
