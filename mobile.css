@@ -11,3 +11,5 @@ html,body{overscroll-behavior:none}#view,#controls{touch-action:none}
 .touch #hud strong{margin-bottom:3px}.touch #hud label{font-size:10px;grid-template-columns:35px 1fr 49px}
 .touch #overlay{display:block;overflow:auto;padding:max(12px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-left)) 20px;background:#18231ef0}
 .touch #overlay h1{font-size:clamp(32px,7vw,64px);margin:5px 0}.touch #overlay p{margin:8px 0;max-width:620px;line-height:1.35}.touch #start{margin:8px}
+
+html.touch-playing, .touch-playing body{touch-action:none;overflow:hidden}

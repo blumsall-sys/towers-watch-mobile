@@ -2,6 +2,21 @@ export function installTouch({stick, canvas, fire, look, draw, release, cancel})
     const axis = {x:0, y:0};
     const knob = stick.firstElementChild;
     const owners = new Map();
+    // Pointer events drive these three surfaces. Cancel their native touch
+    // gestures as well, including Safari's double-tap zoom on button release.
+    const suppressGesture = event => {
+        if (document.documentElement.classList.contains('touch-playing') && event.cancelable) {
+            event.preventDefault();
+        }
+    };
+    for (const surface of [fire, canvas, stick]) {
+        for (const type of ['touchstart', 'touchend']) {
+            surface.addEventListener(type, suppressGesture, {passive:false});
+        }
+    }
+    for (const type of ['gesturestart', 'gesturechange', 'dblclick']) {
+        document.addEventListener(type, suppressGesture, {capture:true, passive:false});
+    }
     function track(element, start, move, end) {
         element.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' || owners.has(element)) return;

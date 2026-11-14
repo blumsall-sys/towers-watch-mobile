@@ -1,4 +1,4 @@
-import {installTouch} from './touch.mjs';
+import {installTouch} from './touch.mjs?v=rapid-fire';
 import {VatCharacters} from './vendor/vat-characters.mjs';
 import {buildRoads,planFormation,routeTo,waves,knightBody} from './defense.mjs';
 import * as pc from './vendor/playcanvas.mjs';
@@ -143,6 +143,7 @@ async function boot(){
     const active=()=>touchPlaying||document.pointerLockElement===canvas;
     function sync(){
         const on=active();
+        document.documentElement.classList.toggle('touch-playing',touchPlaying);
         $('overlay').hidden=on;hud.hidden=!on;$('feedback').hidden=!on;$('ret').hidden=!on;
         $('controls').hidden=!touchPlaying;$('return-home').hidden=on||!touchDevice||finished;
         keys.clear();touch.reset();charge=-1;start.textContent=finished?'Play again':'Resume defense';
